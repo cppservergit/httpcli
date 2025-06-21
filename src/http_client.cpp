@@ -74,7 +74,7 @@ private:
         if (!curl) throw std::runtime_error("Failed to initialize CURL");
 
         std::string response_data;
-        std::map<std::string, std::string> response_headers;
+        std::map<std::string, std::string, std::less<>> response_headers;
 
         curl_easy_setopt(curl, CURLOPT_URL, url.data());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
