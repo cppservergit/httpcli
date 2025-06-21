@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -O2 -std=c++23 -Wall -Wextra -pthread -I./include
+CXXFLAGS = -O3 -std=c++23 -pedantic -Wall -Wextra -pthread -I./include
 LDFLAGS = -lcurl
 
 TARGET = test
@@ -26,7 +26,7 @@ $(TARGET_EXE): $(OBJS)
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-test: $(TARGET_EXE)
+unittest: $(TARGET_EXE)
 	@echo Running unit tests...
 	$(TEST_BIN)
 
