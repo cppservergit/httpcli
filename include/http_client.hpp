@@ -13,7 +13,7 @@ namespace http {
 
 class client {
 public:
-    // Explicit constructor to ensure there's no unintended implicit construction.
+    // Explicit constructor to ensure intentional construction.
     explicit client();
     client(const client&) = default;
     client(client&&) noexcept = default;
@@ -26,9 +26,11 @@ public:
     void set_response_timeout(long seconds) noexcept;
 
     // SSL options.
-    // This client ignores invalid certificates by default.
+    // By default, this client ignores invalid certificates (including expired ones).
     void set_ignore_invalid_certs(bool ignore) noexcept;
-    void set_client_certificate(const std::string& cert, std::optional<std::string> key = std::nullopt) noexcept;
+    // Pass the potential large "key" object by const reference.
+    void set_client_certificate(const std::string& cert,
+                                const std::optional<std::string>& key = std::nullopt) noexcept;
 
     // Response type.
     struct response {
@@ -39,11 +41,17 @@ public:
 
     // HTTP methods.
     response get(const std::string& url, const std::vector<std::string>& request_headers = {});
-    response post(const std::string& url, const std::string& payload, const std::vector<std::string>& request_headers = {});
+    response post(const std::string& url, const std::string& payload,
+                  const std::vector<std::string>& request_headers = {});
+
+    // Callback functions need to be public because they are referenced
+    // from non-member helper functions (see http_client.cpp).
+    static size_t write_callback(const char* ptr, size_t size, size_t nmemb, void* userdata);
+    static size_t header_callback(const char* buffer, size_t size, size_t nitems, void* userdata);
 
 private:
-    // Member variables.
-    bool ignore_invalid_certs_;
+    // In-class initializer ensures invalid certificates (including expired ones) are ignored by default.
+    bool ignore_invalid_certs_{true};
     std::optional<std::string> client_cert_;
     std::optional<std::string> client_key_;
     std::optional<long> connection_timeout_;
@@ -55,9 +63,7 @@ private:
                              const std::string& payload,
                              const std::vector<std::string>& req_headers);
 
-    // Helper functions.
-    static size_t write_callback(char* ptr, size_t size, size_t nmemb, void* userdata);
-    static size_t header_callback(char* buffer, size_t size, size_t nitems, void* userdata);
+    // These helper function declarations can remain private.
     static curl_slist* prepare_headers(const std::vector<std::string>& headers);
     static std::string trim(const std::string& str);
     static std::vector<std::pair<std::string, std::string>> parse_headers(const std::vector<std::string>& raw_headers);
