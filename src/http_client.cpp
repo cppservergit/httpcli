@@ -3,8 +3,38 @@
 
 namespace http {
 
-// Constructor: Initialize libcurl globally and register cleanup with atexit.
-client::client() : ignore_invalid_certs_{true} {
+// RAII helper for managing curl_slist resources.
+struct CurlSListDeleter {
+    void operator()(curl_slist* list) const {
+        if (list) {
+            curl_slist_free_all(list);
+        }
+    }
+};
+using CurlSListPtr = std::unique_ptr<curl_slist, CurlSListDeleter>;
+
+// Define local type aliases (instead of using the private ones from client)
+namespace {
+    using ResponseStringPtr = std::string*;            // for response body
+    using HeaderVectorPtr = std::vector<std::string>*;   // for headers
+
+    // Helper functions to register our callbacks with libcurl.
+    inline void setCurlWriteFunction(CURL* curl, std::string* responseData) {
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
+            reinterpret_cast<size_t(*)(char*, size_t, size_t, void*)>(client::write_callback));
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, static_cast<void*>(responseData));
+    }
+
+    inline void setCurlHeaderFunction(CURL* curl, std::vector<std::string>* headerData) {
+        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION,
+            reinterpret_cast<size_t(*)(char*, size_t, size_t, void*)>(client::header_callback));
+        curl_easy_setopt(curl, CURLOPT_HEADERDATA, static_cast<void*>(headerData));
+    }
+} // unnamed namespace
+
+// The constructor does not need to initialize ignore_invalid_certs_ explicitly,
+// since it is in-class initialized to true.
+client::client() {
     static const auto init_global = []() {
         curl_global_init(CURL_GLOBAL_ALL);
         std::atexit([](){ curl_global_cleanup(); });
@@ -27,7 +57,9 @@ void client::set_ignore_invalid_certs(bool ignore) noexcept {
     ignore_invalid_certs_ = ignore;
 }
 
-void client::set_client_certificate(const std::string& cert, std::optional<std::string> key) noexcept {
+// Updated: "key" is passed by const reference.
+void client::set_client_certificate(const std::string& cert,
+                                      const std::optional<std::string>& key) noexcept {
     client_cert_ = cert;
     client_key_ = key;
 }
@@ -37,31 +69,33 @@ client::response client::get(const std::string& url, const std::vector<std::stri
 }
 
 client::response client::post(const std::string& url, const std::string& payload,
-                              const std::vector<std::string>& request_headers) {
+                                const std::vector<std::string>& request_headers) {
     return perform_request("POST", url, payload, request_headers);
 }
 
-// Callback that writes the response body.
-size_t client::write_callback(char* ptr, size_t size, size_t nmemb, void* userdata) {
-    auto* stream = static_cast<std::string*>(userdata);
+// Callback now accepts a pointer-to-const.
+size_t client::write_callback(const char* ptr, size_t size, size_t nmemb, void* userdata) {
+    if (!userdata)
+        return 0;
+    std::string* out = static_cast<std::string*>(userdata);
     size_t total_size = size * nmemb;
-    stream->append(ptr, total_size);
+    out->append(ptr, total_size);
     return total_size;
 }
 
-// Callback that collects raw header data.
-size_t client::header_callback(char* buffer, size_t size, size_t nitems, void* userdata) {
+// Callback now accepts a pointer-to-const.
+size_t client::header_callback(const char* buffer, size_t size, size_t nitems, void* userdata) {
+    if (!userdata)
+        return 0;
+    std::vector<std::string>* headers = static_cast<std::vector<std::string>*>(userdata);
     size_t total_size = size * nitems;
-    auto* headers = static_cast<std::vector<std::string>*>(userdata);
     std::string header_line(buffer, total_size);
-    // Remove trailing newline and carriage return characters.
     while (!header_line.empty() && (header_line.back() == '\r' || header_line.back() == '\n'))
         header_line.pop_back();
     headers->push_back(header_line);
     return total_size;
 }
 
-// Convert vector of header strings to a libcurl header list.
 curl_slist* client::prepare_headers(const std::vector<std::string>& headers) {
     curl_slist* list = nullptr;
     for (const auto& header : headers)
@@ -69,7 +103,6 @@ curl_slist* client::prepare_headers(const std::vector<std::string>& headers) {
     return list;
 }
 
-// Simple trimming helper.
 std::string client::trim(const std::string& str) {
     const std::string whitespace = " \n\r\t\f\v";
     const auto start = str.find_first_not_of(whitespace);
@@ -79,7 +112,6 @@ std::string client::trim(const std::string& str) {
     return str.substr(start, end - start + 1);
 }
 
-// Parse raw header lines into key-value pairs.
 std::vector<std::pair<std::string, std::string>> client::parse_headers(const std::vector<std::string>& raw_headers) {
     std::vector<std::pair<std::string, std::string>> headers;
     for (const auto& line : raw_headers) {
@@ -93,7 +125,6 @@ std::vector<std::pair<std::string, std::string>> client::parse_headers(const std
     return headers;
 }
 
-// Performs the HTTP request.
 client::response client::perform_request(const std::string& method,
                                            const std::string& url,
                                            const std::string& payload,
@@ -103,45 +134,38 @@ client::response client::perform_request(const std::string& method,
     if (!raw_curl)
         throw std::runtime_error("Failed to initialize curl");
 
-    // Wrap the CURL handle so it is automatically cleaned up.
     auto curl_deleter = [](CURL* p) { if (p) curl_easy_cleanup(p); };
     std::unique_ptr<CURL, decltype(curl_deleter)> curl(raw_curl, curl_deleter);
 
     curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
     
-    // Enforce strong TLS version and ciphers:
+    // Enforce TLS v1.2 and a strong cipher list.
     curl_easy_setopt(curl.get(), CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
     curl_easy_setopt(curl.get(), CURLOPT_SSL_CIPHER_LIST, "HIGH:!aNULL:!MD5");
 
-    // Configure HTTP method specifics.
     if (method == "POST") {
         curl_easy_setopt(curl.get(), CURLOPT_POST, 1L);
         curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, payload.c_str());
         curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDSIZE, static_cast<long>(payload.size()));
     }
 
-    // Set timeouts if specified.
     if (connection_timeout_.has_value())
         curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT, connection_timeout_.value());
     if (response_timeout_.has_value())
         curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT, response_timeout_.value());
 
-    // Set callbacks for response body and headers.
     std::string response_body;
-    curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, write_callback);
-    curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &response_body);
+    setCurlWriteFunction(curl.get(), &response_body);
 
     std::vector<std::string> raw_headers;
-    curl_easy_setopt(curl.get(), CURLOPT_HEADERFUNCTION, header_callback);
-    curl_easy_setopt(curl.get(), CURLOPT_HEADERDATA, &raw_headers);
+    setCurlHeaderFunction(curl.get(), &raw_headers);
 
-    // Set request headers if provided.
-    curl_slist* header_list = prepare_headers(req_headers);
-    if (header_list)
-        curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, header_list);
+    // Use RAII to manage the curl_slist.
+    CurlSListPtr header_list_ptr(prepare_headers(req_headers));
+    if (header_list_ptr)
+        curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, header_list_ptr.get());
 
-    // Configure SSL options.
-    // Invalid certificates are ignored by default.
+    // If ignoring invalid certificates (includes expired certs), set verification off.
     if (ignore_invalid_certs_) {
         curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYHOST, 0L);
@@ -153,8 +177,6 @@ client::response client::perform_request(const std::string& method,
     }
 
     CURLcode code = curl_easy_perform(curl.get());
-    if (header_list)
-        curl_slist_free_all(header_list);
     if (code != CURLE_OK)
         throw std::runtime_error("curl_easy_perform() failed: " + std::string(curl_easy_strerror(code)));
 
