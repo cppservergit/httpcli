@@ -108,6 +108,10 @@ client::response client::perform_request(const std::string& method,
     std::unique_ptr<CURL, decltype(curl_deleter)> curl(raw_curl, curl_deleter);
 
     curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+    
+    // Enforce strong TLS version and ciphers:
+    curl_easy_setopt(curl.get(), CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
+    curl_easy_setopt(curl.get(), CURLOPT_SSL_CIPHER_LIST, "HIGH:!aNULL:!MD5");
 
     // Configure HTTP method specifics.
     if (method == "POST") {
@@ -122,7 +126,7 @@ client::response client::perform_request(const std::string& method,
     if (response_timeout_.has_value())
         curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT, response_timeout_.value());
 
-    // Set callbacks for body and header data.
+    // Set callbacks for response body and headers.
     std::string response_body;
     curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &response_body);
@@ -131,7 +135,7 @@ client::response client::perform_request(const std::string& method,
     curl_easy_setopt(curl.get(), CURLOPT_HEADERFUNCTION, header_callback);
     curl_easy_setopt(curl.get(), CURLOPT_HEADERDATA, &raw_headers);
 
-    // Set any request headers provided.
+    // Set request headers if provided.
     curl_slist* header_list = prepare_headers(req_headers);
     if (header_list)
         curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, header_list);
