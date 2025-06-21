@@ -10,7 +10,7 @@ namespace net {
 struct HttpResponse {
     long status_code{};
     std::string body;
-    std::map<std::string, std::string> headers;
+    std::map<std::string, std::string, std::less<>> headers;
 };
 
 class HttpClient {
