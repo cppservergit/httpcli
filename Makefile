@@ -1,38 +1,43 @@
+# Compiler and flags
 CXX = g++
-CXXFLAGS = -O3 -std=c++23 -pedantic -Wall -Wextra -pthread -I./include
-LDFLAGS = -lcurl
+CXXFLAGS = -Wall -Wextra -std=c++20 -pedantic -O2 -Isrc -Iinclude
 
-TARGET = test
-SRCS = src/main.cpp src/http_client.cpp
-OBJS = $(SRCS:.cpp=.o)
+# File layout
+SRC_DIR = src
+INC_DIR = include
+SRC = $(SRC_DIR)/http_client.cpp
+HDR = $(INC_DIR)/http_client.hpp
+OBJ = $(SRC:.cpp=.o)
+LIB = libhttpclient.a
+
+# Test configuration
+TEST_SRC = $(SRC_DIR)/main.cpp
 
 ifeq ($(OS),Windows_NT)
-	RM = del /F /Q
-	TARGET_EXE = $(TARGET).exe
-	TARGET_EXE_WIN = $(subst /,\\,$(TARGET_EXE))
-	OBJS_WIN = $(subst /,\\,$(OBJS))
-	TEST_BIN = $(TARGET_EXE_WIN)
+    TEST_BIN = test.exe
+    RM = del /Q /F
+    OBJ_WIN = $(subst /,\\,$(OBJ))
 else
-	RM = rm -f
-	TARGET_EXE = $(TARGET)
-	TEST_BIN = ./$(TARGET_EXE)
+    TEST_BIN = test
+    RM = rm -f
 endif
 
-all: $(TARGET_EXE)
+all: $(LIB)
 
-$(TARGET_EXE): $(OBJS)
-	$(CXX) $(CXXFLAGS) -o $(TARGET_EXE) $(OBJS) $(LDFLAGS)
-
-%.o: %.cpp
+$(OBJ): $(SRC) $(HDR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-unittest: $(TARGET_EXE)
-	@echo Running unit tests...
-	$(TEST_BIN)
+$(LIB): $(OBJ)
+	ar rcs $@ $^
+
+$(TEST_BIN): $(TEST_SRC) $(LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< -L. -lhttpclient -lcurl
+
+test: $(TEST_BIN)
 
 clean:
 ifeq ($(OS),Windows_NT)
-	$(RM) $(TARGET_EXE_WIN) $(OBJS_WIN)
+	$(RM) $(OBJ_WIN) $(LIB) $(TEST_BIN)
 else
-	$(RM) $(TARGET_EXE) $(OBJS)
+	$(RM) $(OBJ) $(LIB) $(TEST_BIN)
 endif
