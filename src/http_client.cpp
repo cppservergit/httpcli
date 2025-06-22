@@ -12,7 +12,7 @@ struct CurlCallbackContext {
     std::map<std::string, std::string, std::less<>> headers;
 
     // NOSONAR - libcurl requires void* signature
-    static size_t Write(const char* contents, size_t size, size_t nmemb, void* user_data) {
+    static size_t Write(const char* contents, size_t size, size_t nmemb, void* user_data /* SONAR: libcurl requires void* signature */) {
         auto* ctx = static_cast<CurlCallbackContext*>(user_data);
         ctx->body.append(contents, size * nmemb);
         return size * nmemb;
@@ -89,8 +89,6 @@ private:
             throw HttpRequestException("Failed to initialize CURL");
         }
 
-        CurlCallbackContext context;
-
         curl_easy_setopt(curl, CURLOPT_URL, url.data());
         curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
 
@@ -102,6 +100,7 @@ private:
             }
         }
 
+        CurlCallbackContext context;
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlCallbackContext::Write);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &context);
         curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, CurlCallbackContext::Header);
