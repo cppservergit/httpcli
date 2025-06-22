@@ -11,13 +11,15 @@ struct CurlCallbackContext {
     std::string body;
     std::map<std::string, std::string, std::less<>> headers;
 
-    static size_t Write(char* contents, size_t size, size_t nmemb, void* user_data) {
+    // NOSONAR - libcurl requires void* signature
+    static size_t Write(const char* contents, size_t size, size_t nmemb, void* user_data) {
         auto* ctx = static_cast<CurlCallbackContext*>(user_data);
         ctx->body.append(contents, size * nmemb);
         return size * nmemb;
     }
 
-    static size_t Header(char* buffer, size_t size, size_t nitems, void* user_data) {
+    // NOSONAR - libcurl requires void* signature
+    static size_t Header(const char* buffer, size_t size, size_t nitems, void* user_data) {
         auto* ctx = static_cast<CurlCallbackContext*>(user_data);
         const std::string header_line(buffer, size * nitems);
         if (const auto colon = header_line.find(':'); colon != std::string::npos) {
