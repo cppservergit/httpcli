@@ -7,25 +7,30 @@ namespace net {
 
 namespace {
 
-size_t write_callback(char* contents, size_t size, size_t nmemb, void* userptr) {
-    auto* buffer = static_cast<std::string*>(userptr);
-    buffer->append(contents, size * nmemb);
-    return size * nmemb;
-}
+struct CurlCallbackContext {
+    std::string body;
+    std::map<std::string, std::string, std::less<>> headers;
 
-size_t header_callback(char* buffer, size_t size, size_t nitems, void* userptr) {
-    auto* headers = static_cast<std::map<std::string, std::string, std::less<>>*>(userptr);
-    const std::string header_line(buffer, size * nitems);
-    if (const auto colon = header_line.find(':'); colon != std::string::npos) {
-        auto key = header_line.substr(0, colon);
-        auto value = header_line.substr(colon + 1);
-        while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) {
-            value.erase(value.begin());
-        }
-        headers->insert({ std::move(key), std::move(value) });
+    static size_t Write(char* contents, size_t size, size_t nmemb, void* user_data) {
+        auto* ctx = static_cast<CurlCallbackContext*>(user_data);
+        ctx->body.append(contents, size * nmemb);
+        return size * nmemb;
     }
-    return size * nitems;
-}
+
+    static size_t Header(char* buffer, size_t size, size_t nitems, void* user_data) {
+        auto* ctx = static_cast<CurlCallbackContext*>(user_data);
+        const std::string header_line(buffer, size * nitems);
+        if (const auto colon = header_line.find(':'); colon != std::string::npos) {
+            auto key = header_line.substr(0, colon);
+            auto value = header_line.substr(colon + 1);
+            while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) {
+                value.erase(value.begin());
+            }
+            ctx->headers.insert({ std::move(key), std::move(value) });
+        }
+        return size * nitems;
+    }
+};
 
 class CurlGlobal {
 public:
@@ -82,13 +87,11 @@ private:
             throw HttpRequestException("Failed to initialize CURL");
         }
 
-        std::string response_data;
-        std::map<std::string, std::string, std::less<>> response_headers;
-
-        curl_easy_setopt(curl, CURLOPT_URL, url.data());
+        CurlCallbackContext context;
 
         curl_easy_setopt(curl, CURLOPT_USE_SSL, CURLUSESSL_ALL);
         curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
+        curl_easy_setopt(curl, CURLOPT_URL, url.data());
 
         if (!cert_path_.empty()) {
             curl_easy_setopt(curl, CURLOPT_SSLCERT, cert_path_.c_str());
@@ -98,10 +101,10 @@ private:
             }
         }
 
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_data);
-        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
-        curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response_headers);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlCallbackContext::Write);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &context);
+        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, CurlCallbackContext::Header);
+        curl_easy_setopt(curl, CURLOPT_HEADERDATA, &context);
         curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, connect_timeout_ms_);
         curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, response_timeout_ms_);
         curl_easy_setopt(curl, CURLOPT_USERAGENT, "modern-http-client/1.0");
@@ -129,7 +132,7 @@ private:
         curl_slist_free_all(chunk);
         curl_easy_cleanup(curl);
 
-        return HttpResponse{ status, std::move(response_data), std::move(response_headers) };
+        return HttpResponse{ status, std::move(context.body), std::move(context.headers) };
     }
 };
 
