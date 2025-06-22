@@ -13,3 +13,20 @@ Some directives to ignore code were added because:
 2) A SonarCloud bug raises the issue of an unsafe protocol despite the clear use of TLS 1.2 as the minimum accepted.
 
 Check `main.cpp` for examples and unit tests.
+
+To compile and create the static library
+```
+make
+```
+
+To create the test executable and the library if necessary
+```
+make test
+```
+
+Run
+```
+test
+```
+
+Tested on Windows 10 with MSYS2 packages and Ubuntu 24.04.
