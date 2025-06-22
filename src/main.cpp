@@ -25,8 +25,8 @@ void test_post(const net::HttpClient& client) {
 
 int main() {
     auto client = net::HttpClient::create(1500, 4000); // 1.5s connect, 4s response
-    std::thread t1(test_get, std::ref(*client));
-    std::thread t2(test_post, std::ref(*client));
+    std::jthread t1(test_get, std::ref(*client));
+    std::jthread t2(test_post, std::ref(*client));
 	t1.join();
 	t2.join();
 	return 0;
