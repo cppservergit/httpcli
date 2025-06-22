@@ -4,9 +4,16 @@
 #include <string_view>
 #include <map>
 #include <memory>
+#include <stdexcept>
 #include <functional>
 
 namespace net {
+
+class HttpRequestException : public std::runtime_error {
+public:
+    explicit HttpRequestException(std::string_view message)
+        : std::runtime_error(std::string(message)) {}
+};
 
 struct HttpResponse {
     long status_code{};
