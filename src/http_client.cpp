@@ -12,7 +12,7 @@ struct CurlCallbackContext {
     std::map<std::string, std::string, std::less<>> headers;
 
     // NOSONAR - libcurl requires void* signature
-    static size_t Write(const char* contents, size_t size, size_t nmemb, void* user_data /* SONAR: libcurl requires void* signature */) {
+    static size_t Write(const char* contents, size_t size, size_t nmemb, /* NOSONAR: libcurl requires void* signature */ void* user_data) {
         auto* ctx = static_cast<CurlCallbackContext*>(user_data);
         ctx->body.append(contents, size * nmemb);
         return size * nmemb;
@@ -85,54 +85,53 @@ private:
                                  std::string_view body,
                                  const std::map<std::string, std::string, std::less<>>& headers) const {
         const auto curl = curl_easy_init();
-        if (!curl) {
-            throw HttpRequestException("Failed to initialize CURL");
-        }
+        if (curl) {
+			curl_easy_setopt(curl, CURLOPT_URL, url.data());
+			curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
 
-        curl_easy_setopt(curl, CURLOPT_URL, url.data());
-        curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
+			if (!cert_path_.empty()) {
+				curl_easy_setopt(curl, CURLOPT_SSLCERT, cert_path_.c_str());
+				curl_easy_setopt(curl, CURLOPT_SSLKEY, key_path_.c_str());
+				if (!key_pass_.empty()) {
+					curl_easy_setopt(curl, CURLOPT_KEYPASSWD, key_pass_.c_str());
+				}
+			}
 
-        if (!cert_path_.empty()) {
-            curl_easy_setopt(curl, CURLOPT_SSLCERT, cert_path_.c_str());
-            curl_easy_setopt(curl, CURLOPT_SSLKEY, key_path_.c_str());
-            if (!key_pass_.empty()) {
-                curl_easy_setopt(curl, CURLOPT_KEYPASSWD, key_pass_.c_str());
-            }
-        }
+			CurlCallbackContext context;
+			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlCallbackContext::Write);
+			curl_easy_setopt(curl, CURLOPT_WRITEDATA, &context);
+			curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, CurlCallbackContext::Header);
+			curl_easy_setopt(curl, CURLOPT_HEADERDATA, &context);
+			curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, connect_timeout_ms_);
+			curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, response_timeout_ms_);
+			curl_easy_setopt(curl, CURLOPT_USERAGENT, "modern-http-client/1.0");
 
-        CurlCallbackContext context;
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlCallbackContext::Write);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &context);
-        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, CurlCallbackContext::Header);
-        curl_easy_setopt(curl, CURLOPT_HEADERDATA, &context);
-        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, connect_timeout_ms_);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, response_timeout_ms_);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, "modern-http-client/1.0");
+			struct curl_slist* chunk = nullptr;
+			for (const auto& [key, val] : headers) {
+				const std::string header = key + ": " + val;
+				chunk = curl_slist_append(chunk, header.c_str());
+			}
+			curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
 
-        struct curl_slist* chunk = nullptr;
-        for (const auto& [key, val] : headers) {
-            const std::string header = key + ": " + val;
-            chunk = curl_slist_append(chunk, header.c_str());
-        }
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
+			if (method == "POST") {
+				curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.data());
+			}
 
-        if (method == "POST") {
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.data());
-        }
+			if (const auto res = curl_easy_perform(curl); res != CURLE_OK) {
+				curl_slist_free_all(chunk);
+				curl_easy_cleanup(curl);
+				throw HttpRequestException(curl_easy_strerror(res));
+			}
 
-        if (const auto res = curl_easy_perform(curl); res != CURLE_OK) {
-            curl_slist_free_all(chunk);
-            curl_easy_cleanup(curl);
-            throw HttpRequestException(curl_easy_strerror(res));
-        }
+			long status{};
+			curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
 
-        long status{};
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+			curl_slist_free_all(chunk);
+			curl_easy_cleanup(curl);
 
-        curl_slist_free_all(chunk);
-        curl_easy_cleanup(curl);
-
-        return HttpResponse{ status, std::move(context.body), std::move(context.headers) };
+			return HttpResponse{ status, std::move(context.body), std::move(context.headers) };
+        } else 
+			throw HttpRequestException("Failed to initialize CURL");
     }
 };
 
