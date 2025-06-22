@@ -26,7 +26,7 @@ struct CurlCallbackContext {
             while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) {
                 value.erase(value.begin());
             }
-            ctx->headers.insert({ std::move(key), std::move(value) });
+            ctx->headers.try_emplace(std::move(key), std::move(value));
         }
         return size * nitems;
     }
@@ -89,9 +89,8 @@ private:
 
         CurlCallbackContext context;
 
-        curl_easy_setopt(curl, CURLOPT_USE_SSL, CURLUSESSL_ALL);
-        curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
         curl_easy_setopt(curl, CURLOPT_URL, url.data());
+        curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
 
         if (!cert_path_.empty()) {
             curl_easy_setopt(curl, CURLOPT_SSLCERT, cert_path_.c_str());
