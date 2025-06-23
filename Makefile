@@ -1,6 +1,6 @@
 # Compiler and flags
 CXX = g++
-CXXFLAGS = -Wall -Wextra -std=c++20 -pedantic -O2 -Isrc -Iinclude
+CXXFLAGS = -Wall -Wextra -std=c++23 -O2 -Isrc -Iinclude
 
 # File layout
 SRC_DIR = src
